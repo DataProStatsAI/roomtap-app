@@ -39,14 +39,14 @@ interface Listing {
 interface Message {
   id: number;
   listingId: number;
-  fromUser: string;
-  fromEmail: string;
-  toUser: string;
-  toEmail: string;
+  fromUserId: string;
+  fromUserName: string;
+  toUserId: string;
+  toUserName: string;
   message: string;
-  timestamp: string;
   listingTitle: string;
-  read: boolean;
+  isRead: boolean;
+  createdAt: string;
 }
 
 interface Review {
@@ -56,7 +56,7 @@ interface Review {
   userName: string;
   rating: number;
   comment: string;
-  timestamp: string;
+  createdAt: string;
 }
 
 export default function Home() {
@@ -120,22 +120,17 @@ export default function Home() {
     'Utilities Included', 'Security', 'Balcony', 'Elevator'
   ];
 
-  // ONLY load from Supabase - NO localStorage
+  // Load listings from Supabase
   const loadListings = async () => {
     try {
-      console.log('Loading listings from Supabase...');
       const { data, error } = await supabase
         .from('listings')
         .select('*')
         .order('created_at', { ascending: false });
       
-      if (error) {
-        console.error('Supabase error:', error);
-        setListings([]);
-        return;
-      }
+      if (error) throw error;
       
-      if (data && data.length > 0) {
+      if (data) {
         const mappedListings = data.map((item: any) => ({
           id: item.id,
           title: item.title,
@@ -145,9 +140,9 @@ export default function Home() {
           images: item.images || [],
           voiceNote: item.voice_note_url,
           voiceNoteDuration: item.voice_note_duration,
-          userId: item.user_id || '',
-          userName: item.user_name || '',
-          userEmail: item.user_email || '',
+          userId: item.user_id,
+          userName: item.user_name,
+          userEmail: item.user_email,
           isVisible: item.is_visible,
           createdAt: item.created_at,
           views: item.views || 0,
@@ -159,16 +154,77 @@ export default function Home() {
           amenities: item.amenities || []
         }));
         setListings(mappedListings);
-        console.log(`Loaded ${mappedListings.length} listings from Supabase`);
-      } else {
-        console.log('No listings found in Supabase');
-        setListings([]);
       }
     } catch (err) {
       console.error('Failed to load listings:', err);
-      setListings([]);
-    } finally {
-      setLoading(false);
+    }
+  };
+
+  // Load reviews from Supabase
+  const loadReviews = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('reviews')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      
+      if (data) {
+        const mappedReviews = data.map((item: any) => ({
+          id: item.id,
+          listingId: item.listing_id,
+          userId: item.user_id,
+          userName: item.user_name,
+          rating: item.rating,
+          comment: item.comment,
+          createdAt: item.created_at
+        }));
+        setReviews(mappedReviews);
+      }
+    } catch (err) {
+      console.error('Failed to load reviews:', err);
+    }
+  };
+
+  // Load messages from Supabase
+  const loadMessages = async () => {
+    if (!currentUser) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .or(`from_user_id.eq.${currentUser.id},to_user_id.eq.${currentUser.id}`)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      
+      if (data) {
+        const mappedMessages = data.map((item: any) => ({
+          id: item.id,
+          listingId: item.listing_id,
+          fromUserId: item.from_user_id,
+          fromUserName: item.from_user_name,
+          toUserId: item.to_user_id,
+          toUserName: item.to_user_name,
+          message: item.message,
+          listingTitle: item.listing_title,
+          isRead: item.is_read,
+          createdAt: item.created_at
+        }));
+        setMessages(mappedMessages);
+      }
+    } catch (err) {
+      console.error('Failed to load messages:', err);
+    }
+  };
+
+  // Load favorites from localStorage (client-side only)
+  const loadFavorites = () => {
+    const savedFavorites = localStorage.getItem('roomtap_favorites');
+    if (savedFavorites) {
+      setFavorites(JSON.parse(savedFavorites));
     }
   };
 
@@ -273,77 +329,75 @@ export default function Home() {
       return;
     }
     
-    const review = {
+    const reviewData = {
       listing_id: listingId,
       user_id: currentUser.id,
       user_name: currentUser.name,
       rating: newReview.rating,
-      comment: newReview.comment,
+      comment: newReview.comment
     };
     
     try {
-      const { error } = await supabase.from('reviews').insert([review]);
+      const { data, error } = await supabase
+        .from('reviews')
+        .insert([reviewData])
+        .select();
+      
       if (error) throw error;
       
-      const newReviewObj = {
-        id: Date.now(),
-        listingId,
-        userId: currentUser.id,
-        userName: currentUser.name,
-        rating: newReview.rating,
-        comment: newReview.comment,
-        timestamp: new Date().toISOString()
-      };
-      setReviews(prev => [...prev, newReviewObj]);
+      // Add to local state
+      if (data && data[0]) {
+        const newReviewObj = {
+          id: data[0].id,
+          listingId: data[0].listing_id,
+          userId: data[0].user_id,
+          userName: data[0].user_name,
+          rating: data[0].rating,
+          comment: data[0].comment,
+          createdAt: data[0].created_at
+        };
+        setReviews(prev => [newReviewObj, ...prev]);
+      }
+      
       setNewReview({ rating: 5, comment: '' });
       addNotification('Review posted successfully!', 'success');
     } catch (error) {
       console.error('Error saving review:', error);
-      alert('Failed to post review');
+      alert('Failed to post review. Please try again.');
     }
   };
 
   useEffect(() => {
-    // Clear any old localStorage listings on startup
-    localStorage.removeItem('roomtap_listings');
+    const init = async () => {
+      setLoading(true);
+      await loadListings();
+      await loadReviews();
+      loadFavorites();
+      
+      const savedUser = localStorage.getItem('roomtap_user');
+      if (savedUser) {
+        setCurrentUser(JSON.parse(savedUser));
+        setShowLogin(false);
+        await loadMessages();
+      }
+      
+      setLoading(false);
+    };
     
-    // Load listings from Supabase
-    loadListings();
+    init();
     
-    // Auto-refresh every 10 seconds
-    const interval = setInterval(loadListings, 10000);
-
-    // Load other data from localStorage (only non-listing data)
-    const savedMessages = localStorage.getItem('roomtap_messages');
-    const savedUser = localStorage.getItem('roomtap_user');
-    const savedFavorites = localStorage.getItem('roomtap_favorites');
-    const savedReviews = localStorage.getItem('roomtap_reviews');
+    // Auto-refresh listings every 10 seconds
+    const interval = setInterval(() => {
+      loadListings();
+      loadReviews();
+      if (currentUser) loadMessages();
+    }, 10000);
     
-    if (savedMessages) setMessages(JSON.parse(savedMessages));
-    if (savedUser) {
-      setCurrentUser(JSON.parse(savedUser));
-      setShowLogin(false);
-    }
-    if (savedFavorites) setFavorites(JSON.parse(savedFavorites));
-    if (savedReviews) setReviews(JSON.parse(savedReviews));
-
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       clearInterval(interval);
     };
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('roomtap_messages', JSON.stringify(messages));
-  }, [messages]);
-  
-  useEffect(() => {
-    localStorage.setItem('roomtap_favorites', JSON.stringify(favorites));
-  }, [favorites]);
-  
-  useEffect(() => {
-    localStorage.setItem('roomtap_reviews', JSON.stringify(reviews));
-  }, [reviews]);
+  }, [currentUser?.id]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -424,6 +478,7 @@ export default function Home() {
     localStorage.setItem('roomtap_user', JSON.stringify(user));
     setShowLogin(false);
     addNotification(`Welcome ${name}!`, 'success');
+    loadMessages();
   };
 
   const addListing = async (e: React.FormEvent) => {
@@ -460,13 +515,10 @@ export default function Home() {
     };
     
     try {
-      console.log('Saving listing to Supabase...');
       const { error } = await supabase.from('listings').insert([listingData]);
       if (error) throw error;
       
       addNotification('Listing published successfully!', 'success');
-      
-      // Reload listings to show the new one
       await loadListings();
     } catch (error) {
       console.error('Error saving to Supabase:', error);
@@ -538,7 +590,7 @@ export default function Home() {
     }
   };
 
-  const sendMessage = (e: React.FormEvent, listing: Listing) => {
+  const sendMessage = async (e: React.FormEvent, listing: Listing) => {
     e.preventDefault();
     if (!currentUser) {
       alert('Please login to send messages');
@@ -546,23 +598,29 @@ export default function Home() {
     }
     if (!newMessage.trim()) return;
     
-    const message = {
-      id: Date.now(),
-      listingId: listing.id,
-      fromUser: currentUser.name,
-      fromEmail: currentUser.email,
-      toUser: listing.userName,
-      toEmail: listing.userEmail,
+    const messageData = {
+      listing_id: listing.id,
+      from_user_id: currentUser.id,
+      from_user_name: currentUser.name,
+      to_user_id: listing.userId,
+      to_user_name: listing.userName,
       message: newMessage,
-      timestamp: new Date().toISOString(),
-      listingTitle: listing.title,
-      read: false
+      listing_title: listing.title,
+      is_read: false
     };
     
-    setMessages([message, ...messages]);
-    setNewMessage('');
-    setSelectedListing(null);
-    addNotification(`Message sent to ${listing.userName}!`, 'success');
+    try {
+      const { error } = await supabase.from('messages').insert([messageData]);
+      if (error) throw error;
+      
+      setNewMessage('');
+      setSelectedListing(null);
+      addNotification(`Message sent to ${listing.userName}!`, 'success');
+      await loadMessages();
+    } catch (error) {
+      console.error('Error sending message:', error);
+      alert('Failed to send message. Please try again.');
+    }
   };
 
   const filteredListings = listings.filter(l => {
@@ -607,7 +665,7 @@ export default function Home() {
   });
 
   const myListings = listings.filter(l => l.userId === currentUser?.id);
-  const userMessages = messages.filter(m => m.toEmail === currentUser?.email && !m.read);
+  const userMessages = messages.filter(m => m.toUserId === currentUser?.id && !m.isRead);
   const totalViews = myListings.reduce((sum, l) => sum + l.views, 0);
   const favoriteListings = listings.filter(l => favorites.includes(l.id));
 
@@ -617,7 +675,7 @@ export default function Home() {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f5f5' }}>
         <div style={{ textAlign: 'center' }}>
-          <h2>Loading RoomTap...</h2>
+          <h2>🏠 Loading RoomTap...</h2>
           <p>Connecting to database...</p>
         </div>
       </div>
@@ -664,9 +722,46 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Rest of your UI remains the same... */}
-      {/* (Keep all the UI code from your original file from here) */}
-      
+      {showNotifications && (
+        <div style={{ position: 'fixed', right: '20px', top: '80px', width: '350px', background: 'white', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', zIndex: 200, maxHeight: '400px', overflow: 'auto' }}>
+          <div style={{ padding: '15px', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', borderRadius: '12px 12px 0 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ margin: 0 }}>Notifications</h3>
+            <button onClick={() => setShowNotifications(false)} style={{ background: 'none', border: 'none', color: 'white', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+          </div>
+          {notifications.length === 0 ? (
+            <p style={{ padding: '20px', textAlign: 'center', color: '#666' }}>No notifications</p>
+          ) : (
+            notifications.map(notif => (
+              <div key={notif.id} style={{ padding: '12px', borderBottom: '1px solid #eee', background: notif.read ? 'white' : '#f0f0ff' }}>
+                <p style={{ margin: 0, fontSize: '14px' }}>{notif.message}</p>
+                <small style={{ color: '#999', fontSize: '10px' }}>{new Date(notif.timestamp).toLocaleTimeString()}</small>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {showMessages && currentUser && (
+        <div style={{ position: 'fixed', right: '20px', top: '80px', width: '350px', background: 'white', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', zIndex: 200, maxHeight: '500px', overflow: 'auto' }}>
+          <div style={{ padding: '15px', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', borderRadius: '12px 12px 0 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ margin: 0 }}>Messages</h3>
+            <button onClick={() => setShowMessages(false)} style={{ background: 'none', border: 'none', color: 'white', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+          </div>
+          {messages.length === 0 ? (
+            <p style={{ padding: '20px', textAlign: 'center', color: '#666' }}>No messages yet</p>
+          ) : (
+            messages.map((msg) => (
+              <div key={msg.id} style={{ padding: '12px', borderBottom: '1px solid #eee', background: !msg.isRead && msg.toUserId === currentUser.id ? '#f0f0ff' : 'white' }}>
+                <strong>{msg.fromUserName === currentUser.name ? 'You → ' + msg.toUserName : msg.fromUserName}</strong>
+                <small style={{ color: '#999', display: 'block' }}>about {msg.listingTitle}</small>
+                <p style={{ margin: '8px 0 4px', fontSize: '13px' }}>{msg.message}</p>
+                <small style={{ color: '#aaa', fontSize: '10px' }}>{new Date(msg.createdAt).toLocaleString()}</small>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
       <main style={{ maxWidth: '1400px', margin: '20px auto', padding: '0 20px' }}>
         {activeTab === 'explore' ? (
           <>
@@ -970,7 +1065,7 @@ export default function Home() {
                       <span>⭐ {review.rating}/5</span>
                     </div>
                     <p style={{ margin: 0, fontSize: '14px' }}>{review.comment}</p>
-                    <small style={{ color: '#999' }}>{new Date(review.timestamp).toLocaleDateString()}</small>
+                    <small style={{ color: '#999' }}>{new Date(review.createdAt).toLocaleDateString()}</small>
                   </div>
                 ))}
                 
