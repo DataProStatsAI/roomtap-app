@@ -1,4 +1,6 @@
 {
   "framework": "nextjs",
-  "routes": [{ "src": "/", "dest": "/" }]
+  "routes": [
+    { "src": "/(.*)", "dest": "/$1" }
+  ]
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { supabase } from '../lib/supabaseClient'; // Fixed path
+import { supabase } from '../lib/supabaseClient';
 import { useState, useEffect, useRef } from 'react';
 
 interface User {
@@ -119,6 +119,54 @@ export default function Home() {
     'Utilities Included', 'Security', 'Balcony', 'Elevator'
   ];
 
+  // CRITICAL FIX: Always load from Supabase first
+  const loadListings = async () => {
+    try {
+      console.log('Loading listings from Supabase...');
+      const { data, error } = await supabase
+        .from('listings')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('Supabase error:', error);
+        return;
+      }
+      
+      if (data && data.length > 0) {
+        const mappedListings = data.map((item: any) => ({
+          id: item.id,
+          title: item.title,
+          price: item.price,
+          location: item.location,
+          description: item.description || '',
+          images: item.images || [],
+          voiceNote: item.voice_note_url,
+          voiceNoteDuration: item.voice_note_duration,
+          userId: item.user_id || '',
+          userName: item.user_name || '',
+          userEmail: item.user_email || '',
+          isVisible: item.is_visible,
+          createdAt: item.created_at,
+          views: item.views || 0,
+          latitude: item.latitude,
+          longitude: item.longitude,
+          category: item.category || 'room',
+          bedrooms: item.bedrooms || 1,
+          bathrooms: item.bathrooms || 1,
+          amenities: item.amenities || []
+        }));
+        setListings(mappedListings);
+        console.log(`Loaded ${mappedListings.length} listings from Supabase`);
+      } else {
+        console.log('No listings found in Supabase');
+        setListings([]);
+      }
+    } catch (err) {
+      console.error('Failed to load listings:', err);
+    }
+  };
+
   const getUserLocation = () => {
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
@@ -210,7 +258,7 @@ export default function Home() {
     });
   };
 
-  const addReview = (listingId: number) => {
+  const addReview = async (listingId: number) => {
     if (!currentUser) {
       alert('Please login to post a review');
       return;
@@ -219,133 +267,64 @@ export default function Home() {
       alert('Please write a review');
       return;
     }
+    
     const review = {
-      id: Date.now(),
-      listingId,
-      userId: currentUser.id,
-      userName: currentUser.name,
+      listing_id: listingId,
+      user_id: currentUser.id,
+      user_name: currentUser.name,
       rating: newReview.rating,
       comment: newReview.comment,
-      timestamp: new Date().toISOString()
     };
-    setReviews(prev => [...prev, review]);
-    setNewReview({ rating: 5, comment: '' });
-    addNotification('Review posted successfully!', 'success');
+    
+    try {
+      const { error } = await supabase.from('reviews').insert([review]);
+      if (error) throw error;
+      
+      const newReviewObj = {
+        id: Date.now(),
+        listingId,
+        userId: currentUser.id,
+        userName: currentUser.name,
+        rating: newReview.rating,
+        comment: newReview.comment,
+        timestamp: new Date().toISOString()
+      };
+      setReviews(prev => [...prev, newReviewObj]);
+      setNewReview({ rating: 5, comment: '' });
+      addNotification('Review posted successfully!', 'success');
+    } catch (error) {
+      console.error('Error saving review:', error);
+      alert('Failed to post review');
+    }
   };
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const { data: supabaseListings, error } = await supabase
-          .from('listings')
-          .select('*')
-          .limit(20);
-        
-        if (!error && supabaseListings && supabaseListings.length > 0) {
-          const mappedListings = supabaseListings.map((item: any) => ({
-            id: typeof item.id === 'string' ? parseInt(item.id) || Date.now() : item.id,
-            title: item.title,
-            price: item.price,
-            location: item.location,
-            description: item.description || '',
-            images: item.images || [],
-            userId: item.user_id || '',
-            userName: item.user_name || '',
-            userEmail: item.user_email || '',
-            isVisible: item.is_visible,
-            createdAt: item.created_at,
-            views: item.views || 0,
-            latitude: item.latitude,
-            longitude: item.longitude,
-            category: item.category,
-            bedrooms: item.bedrooms,
-            bathrooms: item.bathrooms,
-            amenities: item.amenities || []
-          }));
-          setListings(mappedListings);
-        } else {
-          const savedListings = localStorage.getItem('roomtap_listings');
-          if (savedListings) {
-            setListings(JSON.parse(savedListings));
-          } else {
-            const sampleListings = [
-              {
-                id: 1,
-                title: "Cozy Room near UZ",
-                price: 120,
-                location: "Avondale, Harare",
-                description: "Beautiful room close to university, perfect for students.",
-                images: ["https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=500"],
-                userId: "user1",
-                userName: "John Doe",
-                userEmail: "john@example.com",
-                isVisible: true,
-                createdAt: new Date().toISOString(),
-                views: 45,
-                latitude: -17.7989,
-                longitude: 31.0335,
-                category: 'room',
-                bedrooms: 1,
-                bathrooms: 1,
-                amenities: ['WiFi', 'Utilities Included', 'Furnished']
-              },
-              {
-                id: 2,
-                title: "Modern Shared Apartment",
-                price: 80,
-                location: "Belvedere, Harare",
-                description: "Spacious shared apartment with great amenities.",
-                images: ["https://images.unsplash.com/photo-1560448204-603b3fc33ddc?w=500"],
-                userId: "user2",
-                userName: "Jane Smith",
-                userEmail: "jane@example.com",
-                isVisible: true,
-                createdAt: new Date(Date.now() - 7 * 86400000).toISOString(),
-                views: 32,
-                latitude: -17.8150,
-                longitude: 31.0230,
-                category: 'apartment',
-                bedrooms: 2,
-                bathrooms: 2,
-                amenities: ['WiFi', 'Parking', 'Pool', 'Gym']
-              }
-            ];
-            setListings(sampleListings);
-          }
-        }
-      } catch (error) {
-        console.error('Error loading from Supabase:', error);
-        const savedListings = localStorage.getItem('roomtap_listings');
-        if (savedListings) {
-          setListings(JSON.parse(savedListings));
-        }
-      }
+    // Load listings from Supabase on mount
+    loadListings();
+    
+    // Auto-refresh every 10 seconds
+    const interval = setInterval(loadListings, 10000);
 
-      const savedMessages = localStorage.getItem('roomtap_messages');
-      const savedUser = localStorage.getItem('roomtap_user');
-      const savedFavorites = localStorage.getItem('roomtap_favorites');
-      const savedReviews = localStorage.getItem('roomtap_reviews');
-      
-      if (savedMessages) setMessages(JSON.parse(savedMessages));
-      if (savedUser) {
-        setCurrentUser(JSON.parse(savedUser));
-        setShowLogin(false);
-      }
-      if (savedFavorites) setFavorites(JSON.parse(savedFavorites));
-      if (savedReviews) setReviews(JSON.parse(savedReviews));
-    };
-
-    loadData();
+    // Load other data from localStorage
+    const savedMessages = localStorage.getItem('roomtap_messages');
+    const savedUser = localStorage.getItem('roomtap_user');
+    const savedFavorites = localStorage.getItem('roomtap_favorites');
+    const savedReviews = localStorage.getItem('roomtap_reviews');
+    
+    if (savedMessages) setMessages(JSON.parse(savedMessages));
+    if (savedUser) {
+      setCurrentUser(JSON.parse(savedUser));
+      setShowLogin(false);
+    }
+    if (savedFavorites) setFavorites(JSON.parse(savedFavorites));
+    if (savedReviews) setReviews(JSON.parse(savedReviews));
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      clearInterval(interval);
     };
   }, []);
 
-  useEffect(() => {
-    if (listings.length) localStorage.setItem('roomtap_listings', JSON.stringify(listings));
-  }, [listings]);
-  
   useEffect(() => {
     localStorage.setItem('roomtap_messages', JSON.stringify(messages));
   }, [messages]);
@@ -451,21 +430,19 @@ export default function Home() {
     }
     
     const coords = getCoordinatesFromAddress(newListing.location);
-    const listing = {
-      id: Date.now(),
+    
+    const listingData = {
       title: newListing.title,
       price: Number(newListing.price),
       location: newListing.location,
       description: newListing.description || "No description provided",
       images: newListing.images,
-      voiceNote: voiceNoteUrl,
-      voiceNoteDuration: recordingDuration,
-      userId: currentUser.id,
-      userName: currentUser.name,
-      userEmail: currentUser.email,
-      isVisible: true,
-      createdAt: new Date().toISOString(),
-      views: 0,
+      voice_note_url: voiceNoteUrl,
+      voice_note_duration: recordingDuration,
+      user_id: currentUser.id,
+      user_name: currentUser.name,
+      user_email: currentUser.email,
+      is_visible: true,
       latitude: coords.lat,
       longitude: coords.lng,
       category: newListing.category,
@@ -474,27 +451,18 @@ export default function Home() {
       amenities: newListing.amenities
     };
     
-    setListings([listing, ...listings]);
-    
     try {
-      await supabase.from('listings').insert([{
-        title: listing.title,
-        price: listing.price,
-        location: listing.location,
-        description: listing.description,
-        images: listing.images,
-        category: listing.category,
-        bedrooms: listing.bedrooms,
-        bathrooms: listing.bathrooms,
-        amenities: listing.amenities,
-        user_id: listing.userId,
-        user_name: listing.userName,
-        user_email: listing.userEmail,
-        latitude: listing.latitude,
-        longitude: listing.longitude
-      }]);
+      console.log('Saving listing to Supabase...', listingData);
+      const { error } = await supabase.from('listings').insert([listingData]);
+      if (error) throw error;
+      
+      addNotification('Listing published successfully!', 'success');
+      
+      // Reload listings to show the new one
+      await loadListings();
     } catch (error) {
       console.error('Error saving to Supabase:', error);
+      alert('Failed to save listing. Please try again.');
     }
     
     setNewListing({ 
@@ -505,36 +473,61 @@ export default function Home() {
     setVoiceNoteUrl('');
     setRecordingDuration(0);
     setShowForm(false);
-    addNotification('Listing published successfully!', 'success');
   };
 
-  const deleteListing = (id: number, userId: string) => {
+  const deleteListing = async (id: number, userId: string) => {
     if (currentUser?.id !== userId) {
       alert('You can only delete your own listings!');
       return;
     }
     if (confirm('Delete this listing?')) {
-      setListings(listings.filter(l => l.id !== id));
-      addNotification('Listing deleted', 'info');
+      try {
+        const { error } = await supabase.from('listings').delete().eq('id', id);
+        if (error) throw error;
+        
+        await loadListings(); // Reload after deletion
+        addNotification('Listing deleted', 'info');
+      } catch (error) {
+        console.error('Error deleting listing:', error);
+        alert('Failed to delete listing');
+      }
     }
   };
 
-  const toggleVisibility = (id: number, userId: string) => {
+  const toggleVisibility = async (id: number, userId: string) => {
     if (currentUser?.id !== userId) {
       alert('You can only manage your own listings!');
       return;
     }
-    setListings(listings.map(l => 
-      l.id === id ? { ...l, isVisible: !l.isVisible } : l
-    ));
+    
     const listing = listings.find(l => l.id === id);
-    addNotification(`Listing ${listing?.isVisible ? 'hidden' : 'visible'}`, 'info');
+    if (!listing) return;
+    
+    const newVisibility = !listing.isVisible;
+    
+    try {
+      const { error } = await supabase
+        .from('listings')
+        .update({ is_visible: newVisibility })
+        .eq('id', id);
+      
+      if (error) throw error;
+      
+      await loadListings(); // Reload after update
+      addNotification(`Listing ${newVisibility ? 'visible' : 'hidden'}`, 'info');
+    } catch (error) {
+      console.error('Error updating visibility:', error);
+      alert('Failed to update listing');
+    }
   };
 
-  const incrementViews = (id: number) => {
-    setListings(listings.map(l => 
-      l.id === id ? { ...l, views: l.views + 1 } : l
-    ));
+  const incrementViews = async (id: number) => {
+    const listing = listings.find(l => l.id === id);
+    if (listing) {
+      const newViews = listing.views + 1;
+      await supabase.from('listings').update({ views: newViews }).eq('id', id);
+      await loadListings(); // Reload to get updated views
+    }
   };
 
   const sendMessage = (e: React.FormEvent, listing: Listing) => {
@@ -564,7 +557,6 @@ export default function Home() {
     addNotification(`Message sent to ${listing.userName}!`, 'success');
   };
 
-  // Fixed: Added null check for listing.latitude and listing.longitude
   const filteredListings = listings.filter(l => {
     if (!l.isVisible) return false;
     
@@ -873,7 +865,7 @@ export default function Home() {
             </div>
             {sortedListings.length === 0 && (
               <div style={{ textAlign: 'center', padding: '60px', background: 'white', borderRadius: '16px' }}>
-                <p>No listings found. Try adjusting your filters!</p>
+                <p>No listings found. Be the first to add one!</p>
               </div>
             )}
           </>
