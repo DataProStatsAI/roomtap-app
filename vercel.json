@@ -1,6 +1,5 @@
 {
   "framework": "nextjs",
-  "routes": [
-    { "src": "/(.*)", "dest": "/$1" }
-  ]
+  "buildCommand": "next build",
+  "outputDirectory": ".next"
 }
