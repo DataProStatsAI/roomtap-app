@@ -127,7 +127,6 @@ export default function Home() {
     'Utilities Included', 'Security', 'Balcony', 'Elevator'
   ];
 
-  // Load listings from Supabase
   const loadListings = async () => {
     try {
       const { data, error } = await supabase
@@ -167,7 +166,6 @@ export default function Home() {
     }
   };
 
-  // Load reviews from Supabase
   const loadReviews = async () => {
     try {
       const { data, error } = await supabase
@@ -194,13 +192,41 @@ export default function Home() {
     }
   };
 
-  // Load favorites from localStorage
   const loadFavorites = () => {
     const savedFavorites = localStorage.getItem('roomtap_favorites');
     if (savedFavorites) {
       setFavorites(JSON.parse(savedFavorites));
     }
   };
+
+  useEffect(() => {
+    const init = async () => {
+      await loadListings();
+      await loadReviews();
+      loadFavorites();
+      
+      setTimeout(() => {
+        setShowSplash(false);
+        setTimeout(() => {
+          setIsLoading(false);
+        }, 300);
+      }, 2500);
+    };
+    
+    init();
+    
+    const interval = setInterval(() => {
+      if (!isLoading) {
+        loadListings();
+        loadReviews();
+      }
+    }, 10000);
+    
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      clearInterval(interval);
+    };
+  }, []);
 
   const getUserLocation = () => {
     if ('geolocation' in navigator) {
@@ -304,26 +330,19 @@ export default function Home() {
     };
     
     try {
-      const { data, error } = await supabase
-        .from('reviews')
-        .insert([reviewData])
-        .select();
-      
+      const { error } = await supabase.from('reviews').insert([reviewData]);
       if (error) throw error;
       
-      if (data && data[0]) {
-        const newReviewObj = {
-          id: data[0].id,
-          listingId: data[0].listing_id,
-          userId: data[0].user_id,
-          userName: data[0].user_name,
-          rating: data[0].rating,
-          comment: data[0].comment,
-          createdAt: data[0].created_at
-        };
-        setReviews(prev => [newReviewObj, ...prev]);
-      }
-      
+      const newReviewObj = {
+        id: Date.now(),
+        listingId,
+        userId: currentUser.id,
+        userName: currentUser.name,
+        rating: newReview.rating,
+        comment: newReview.comment,
+        createdAt: new Date().toISOString()
+      };
+      setReviews(prev => [newReviewObj, ...prev]);
       setNewReview({ rating: 5, comment: '' });
       addNotification('Review posted successfully!', 'success');
     } catch (error) {
@@ -331,37 +350,6 @@ export default function Home() {
       alert('Failed to post review. Please try again.');
     }
   };
-
-  useEffect(() => {
-    const init = async () => {
-      await loadListings();
-      await loadReviews();
-      loadFavorites();
-      
-      // Hide splash screen after 2.5 seconds
-      setTimeout(() => {
-        setShowSplash(false);
-        setTimeout(() => {
-          setIsLoading(false);
-        }, 300);
-      }, 2500);
-    };
-    
-    init();
-    
-    // Auto-refresh listings every 10 seconds
-    const interval = setInterval(() => {
-      if (!isLoading) {
-        loadListings();
-        loadReviews();
-      }
-    }, 10000);
-    
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      clearInterval(interval);
-    };
-  }, []);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -429,6 +417,17 @@ export default function Home() {
   const deleteVoiceNote = () => {
     setVoiceNoteUrl('');
     setRecordingDuration(0);
+  };
+
+  const handleLogin = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const name = formData.get('name') as string;
+    const email = formData.get('email') as string;
+    
+    const user = { id: 'user_' + Date.now(), name, email, isLoggedIn: true };
+    localStorage.setItem('roomtap_user', JSON.stringify(user));
+    addNotification(`Welcome ${name}!`, 'success');
   };
 
   const addListing = async (e: React.FormEvent) => {
@@ -606,6 +605,7 @@ export default function Home() {
   });
 
   const myListings = listings.filter(l => l.userId === currentUser.id);
+  const userMessages = messages.filter(m => m.toUserId === currentUser.id && !m.isRead);
   const totalViews = myListings.reduce((sum, l) => sum + l.views, 0);
   const favoriteListings = listings.filter(l => favorites.includes(l.id));
 
@@ -655,7 +655,7 @@ export default function Home() {
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '40px', marginBottom: '20px' }}>🏠</div>
           <div style={{ width: '40px', height: '40px', border: '4px solid #667eea', borderTopColor: 'transparent', borderRadius: '50%', margin: '0 auto', animation: 'spin 1s linear infinite' }}></div>
-          <p style={{ marginTop: '20px', color: '#666' }}>Loading your accommodations...</p>
+          <p style={{ marginTop: '20px', color: '#666' }}>Loading accommodations...</p>
           <style>{`
             @keyframes spin {
               to { transform: rotate(360deg); }
