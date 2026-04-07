@@ -60,13 +60,19 @@ interface Review {
 }
 
 export default function Home() {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  // Default demo user - NO LOGIN REQUIRED
+  const [currentUser] = useState<User>({
+    id: 'guest_' + Date.now(),
+    name: 'Guest User',
+    email: 'guest@roomtap.com',
+    isLoggedIn: true
+  });
+  
   const [listings, setListings] = useState<Listing[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [showLogin, setShowLogin] = useState(true);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [showMessages, setShowMessages] = useState(false);
   const [activeTab, setActiveTab] = useState('explore');
@@ -187,40 +193,7 @@ export default function Home() {
     }
   };
 
-  // Load messages from Supabase
-  const loadMessages = async () => {
-    if (!currentUser) return;
-    
-    try {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .or(`from_user_id.eq.${currentUser.id},to_user_id.eq.${currentUser.id}`)
-        .order('created_at', { ascending: false });
-      
-      if (error) throw error;
-      
-      if (data) {
-        const mappedMessages = data.map((item: any) => ({
-          id: item.id,
-          listingId: item.listing_id,
-          fromUserId: item.from_user_id,
-          fromUserName: item.from_user_name,
-          toUserId: item.to_user_id,
-          toUserName: item.to_user_name,
-          message: item.message,
-          listingTitle: item.listing_title,
-          isRead: item.is_read,
-          createdAt: item.created_at
-        }));
-        setMessages(mappedMessages);
-      }
-    } catch (err) {
-      console.error('Failed to load messages:', err);
-    }
-  };
-
-  // Load favorites from localStorage (client-side only)
+  // Load favorites from localStorage
   const loadFavorites = () => {
     const savedFavorites = localStorage.getItem('roomtap_favorites');
     if (savedFavorites) {
@@ -302,10 +275,6 @@ export default function Home() {
   };
 
   const toggleFavorite = (listingId: number) => {
-    if (!currentUser) {
-      alert('Please login to save favorites');
-      return;
-    }
     setFavorites(prev => {
       const newFavorites = prev.includes(listingId) 
         ? prev.filter(id => id !== listingId)
@@ -320,10 +289,6 @@ export default function Home() {
   };
 
   const addReview = async (listingId: number) => {
-    if (!currentUser) {
-      alert('Please login to post a review');
-      return;
-    }
     if (!newReview.comment.trim()) {
       alert('Please write a review');
       return;
@@ -345,7 +310,6 @@ export default function Home() {
       
       if (error) throw error;
       
-      // Add to local state
       if (data && data[0]) {
         const newReviewObj = {
           id: data[0].id,
@@ -373,14 +337,6 @@ export default function Home() {
       await loadListings();
       await loadReviews();
       loadFavorites();
-      
-      const savedUser = localStorage.getItem('roomtap_user');
-      if (savedUser) {
-        setCurrentUser(JSON.parse(savedUser));
-        setShowLogin(false);
-        await loadMessages();
-      }
-      
       setLoading(false);
     };
     
@@ -390,14 +346,13 @@ export default function Home() {
     const interval = setInterval(() => {
       loadListings();
       loadReviews();
-      if (currentUser) loadMessages();
     }, 10000);
     
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       clearInterval(interval);
     };
-  }, [currentUser?.id]);
+  }, []);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -467,26 +422,8 @@ export default function Home() {
     setRecordingDuration(0);
   };
 
-  const handleLogin = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    const name = formData.get('name') as string;
-    const email = formData.get('email') as string;
-    
-    const user = { id: 'user_' + Date.now(), name, email, isLoggedIn: true };
-    setCurrentUser(user);
-    localStorage.setItem('roomtap_user', JSON.stringify(user));
-    setShowLogin(false);
-    addNotification(`Welcome ${name}!`, 'success');
-    loadMessages();
-  };
-
   const addListing = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser) {
-      alert('Please login first');
-      return;
-    }
     if (newListing.images.length === 0) {
       alert('Please add at least one image');
       return;
@@ -536,7 +473,7 @@ export default function Home() {
   };
 
   const deleteListing = async (id: number, userId: string) => {
-    if (currentUser?.id !== userId) {
+    if (currentUser.id !== userId) {
       alert('You can only delete your own listings!');
       return;
     }
@@ -555,7 +492,7 @@ export default function Home() {
   };
 
   const toggleVisibility = async (id: number, userId: string) => {
-    if (currentUser?.id !== userId) {
+    if (currentUser.id !== userId) {
       alert('You can only manage your own listings!');
       return;
     }
@@ -592,10 +529,6 @@ export default function Home() {
 
   const sendMessage = async (e: React.FormEvent, listing: Listing) => {
     e.preventDefault();
-    if (!currentUser) {
-      alert('Please login to send messages');
-      return;
-    }
     if (!newMessage.trim()) return;
     
     const messageData = {
@@ -616,7 +549,6 @@ export default function Home() {
       setNewMessage('');
       setSelectedListing(null);
       addNotification(`Message sent to ${listing.userName}!`, 'success');
-      await loadMessages();
     } catch (error) {
       console.error('Error sending message:', error);
       alert('Failed to send message. Please try again.');
@@ -664,8 +596,7 @@ export default function Home() {
     }
   });
 
-  const myListings = listings.filter(l => l.userId === currentUser?.id);
-  const userMessages = messages.filter(m => m.toUserId === currentUser?.id && !m.isRead);
+  const myListings = listings.filter(l => l.userId === currentUser.id);
   const totalViews = myListings.reduce((sum, l) => sum + l.views, 0);
   const favoriteListings = listings.filter(l => favorites.includes(l.id));
 
@@ -682,23 +613,6 @@ export default function Home() {
     );
   }
 
-  if (showLogin) {
-    return (
-      <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ backgroundColor: 'white', padding: '40px', borderRadius: '24px', textAlign: 'center', maxWidth: '400px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
-          <h1 style={{ fontSize: '48px', margin: '0 0 10px 0' }}>🏠 RoomTap</h1>
-          <h2 style={{ fontSize: '24px', marginBottom: '10px' }}>Welcome to RoomTap</h2>
-          <p style={{ color: '#666', marginBottom: '30px' }}>Find your perfect room or list your space</p>
-          <form onSubmit={handleLogin}>
-            <input name="name" placeholder="Full Name" required style={{ width: '100%', padding: '12px', marginBottom: '10px', border: '1px solid #ddd', borderRadius: '8px' }} />
-            <input name="email" type="email" placeholder="Email Address" required style={{ width: '100%', padding: '12px', marginBottom: '20px', border: '1px solid #ddd', borderRadius: '8px' }} />
-            <button type="submit" style={{ width: '100%', padding: '12px', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px' }}>Get Started →</button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={{ minHeight: '100vh', background: '#f5f5f5' }}>
       <header style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', padding: '15px 20px', position: 'sticky', top: 0, zIndex: 100, boxShadow: '0 2px 10px rgba(0,0,0,0.1)' }}>
@@ -708,15 +622,11 @@ export default function Home() {
             <button onClick={() => setActiveTab('explore')} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontWeight: activeTab === 'explore' ? 'bold' : 'normal', fontSize: '14px' }}>🔍 Explore</button>
             <button onClick={() => setActiveTab('favorites')} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontWeight: activeTab === 'favorites' ? 'bold' : 'normal', fontSize: '14px' }}>❤️ Favorites ({favorites.length})</button>
             <button onClick={() => setActiveTab('dashboard')} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontWeight: activeTab === 'dashboard' ? 'bold' : 'normal', fontSize: '14px' }}>📊 Dashboard</button>
-            <button onClick={() => setShowMessages(!showMessages)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', padding: '8px 12px', borderRadius: '8px', cursor: 'pointer', color: 'white', fontSize: '14px', position: 'relative' }}>
-              💬 {userMessages.length > 0 && <span style={{ position: 'absolute', top: '-5px', right: '-5px', background: '#ef4444', borderRadius: '50%', padding: '2px 6px', fontSize: '10px' }}>{userMessages.length}</span>}
-            </button>
             <button onClick={() => setShowNotifications(!showNotifications)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', padding: '8px 12px', borderRadius: '8px', cursor: 'pointer', color: 'white', fontSize: '14px', position: 'relative' }}>
               🔔 {notifications.filter(n => !n.read).length > 0 && <span style={{ position: 'absolute', top: '-5px', right: '-5px', background: '#ef4444', borderRadius: '50%', padding: '2px 6px', fontSize: '10px' }}>{notifications.filter(n => !n.read).length}</span>}
             </button>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span>👋 {currentUser?.name.split(' ')[0]}</span>
-              <button onClick={() => { localStorage.clear(); window.location.reload(); }} style={{ background: 'rgba(0,0,0,0.2)', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '5px', cursor: 'pointer', fontSize: '12px' }}>Logout</button>
+              <span>👋 {currentUser.name.split(' ')[0]}</span>
             </div>
           </div>
         </div>
@@ -735,27 +645,6 @@ export default function Home() {
               <div key={notif.id} style={{ padding: '12px', borderBottom: '1px solid #eee', background: notif.read ? 'white' : '#f0f0ff' }}>
                 <p style={{ margin: 0, fontSize: '14px' }}>{notif.message}</p>
                 <small style={{ color: '#999', fontSize: '10px' }}>{new Date(notif.timestamp).toLocaleTimeString()}</small>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {showMessages && currentUser && (
-        <div style={{ position: 'fixed', right: '20px', top: '80px', width: '350px', background: 'white', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', zIndex: 200, maxHeight: '500px', overflow: 'auto' }}>
-          <div style={{ padding: '15px', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', borderRadius: '12px 12px 0 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0 }}>Messages</h3>
-            <button onClick={() => setShowMessages(false)} style={{ background: 'none', border: 'none', color: 'white', fontSize: '20px', cursor: 'pointer' }}>✕</button>
-          </div>
-          {messages.length === 0 ? (
-            <p style={{ padding: '20px', textAlign: 'center', color: '#666' }}>No messages yet</p>
-          ) : (
-            messages.map((msg) => (
-              <div key={msg.id} style={{ padding: '12px', borderBottom: '1px solid #eee', background: !msg.isRead && msg.toUserId === currentUser.id ? '#f0f0ff' : 'white' }}>
-                <strong>{msg.fromUserName === currentUser.name ? 'You → ' + msg.toUserName : msg.fromUserName}</strong>
-                <small style={{ color: '#999', display: 'block' }}>about {msg.listingTitle}</small>
-                <p style={{ margin: '8px 0 4px', fontSize: '13px' }}>{msg.message}</p>
-                <small style={{ color: '#aaa', fontSize: '10px' }}>{new Date(msg.createdAt).toLocaleString()}</small>
               </div>
             ))
           )}
@@ -986,11 +875,6 @@ export default function Home() {
                 <div>Total Views</div>
               </div>
               <div style={{ background: 'white', padding: '20px', borderRadius: '12px', textAlign: 'center' }}>
-                <div style={{ fontSize: '32px' }}>💬</div>
-                <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#667eea' }}>{userMessages.length}</div>
-                <div>Unread Messages</div>
-              </div>
-              <div style={{ background: 'white', padding: '20px', borderRadius: '12px', textAlign: 'center' }}>
                 <div style={{ fontSize: '32px' }}>⭐</div>
                 <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#667eea' }}>{reviews.filter(r => myListings.some(l => l.id === r.listingId)).length}</div>
                 <div>Total Reviews</div>
@@ -1069,7 +953,7 @@ export default function Home() {
                   </div>
                 ))}
                 
-                {currentUser && currentUser.id !== selectedListing.userId && (
+                {currentUser.id !== selectedListing.userId && (
                   <div style={{ marginTop: '15px' }}>
                     <h5>Write a Review</h5>
                     <select value={newReview.rating} onChange={e => setNewReview({...newReview, rating: parseInt(e.target.value)})} style={{ padding: '8px', marginBottom: '10px', borderRadius: '8px', width: '100%' }}>
