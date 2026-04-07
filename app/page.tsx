@@ -60,7 +60,7 @@ interface Review {
 }
 
 export default function Home() {
-  // Default demo user - NO LOGIN REQUIRED
+  // DEFAULT USER - NO LOGIN REQUIRED
   const [currentUser] = useState<User>({
     id: 'guest_' + Date.now(),
     name: 'Guest User',
@@ -93,6 +93,7 @@ export default function Home() {
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [voiceNoteUrl, setVoiceNoteUrl] = useState('');
   const [loading, setLoading] = useState(true);
+  const [splashFinished, setSplashFinished] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -337,15 +338,24 @@ export default function Home() {
       await loadListings();
       await loadReviews();
       loadFavorites();
-      setLoading(false);
+      
+      // Show splash screen for at least 2 seconds
+      setTimeout(() => {
+        setLoading(false);
+        setTimeout(() => {
+          setSplashFinished(true);
+        }, 500);
+      }, 2000);
     };
     
     init();
     
     // Auto-refresh listings every 10 seconds
     const interval = setInterval(() => {
-      loadListings();
-      loadReviews();
+      if (!loading) {
+        loadListings();
+        loadReviews();
+      }
     }, 10000);
     
     return () => {
@@ -602,17 +612,90 @@ export default function Home() {
 
   const placeholderImg = "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=500&q=80";
 
-  if (loading) {
+  // SPLASH SCREEN
+  if (loading || !splashFinished) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f5f5' }}>
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 9999,
+        animation: 'fadeOut 0.5s ease-out 2s forwards'
+      }}>
+        <style>{`
+          @keyframes fadeOut {
+            from { opacity: 1; visibility: visible; }
+            to { opacity: 0; visibility: hidden; }
+          }
+          @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-20px); }
+          }
+          @keyframes pulse {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 1; }
+          }
+          @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+          .splash-icon {
+            animation: bounce 1s ease-in-out infinite;
+          }
+          .loading-dots {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            margin-top: 30px;
+          }
+          .loading-dots span {
+            width: 12px;
+            height: 12px;
+            background: white;
+            border-radius: 50%;
+            animation: pulse 1.4s ease-in-out infinite;
+          }
+          .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+          .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+        `}</style>
+        
         <div style={{ textAlign: 'center' }}>
-          <h2>🏠 Loading RoomTap...</h2>
-          <p>Connecting to database...</p>
+          <div className="splash-icon" style={{ fontSize: '80px', marginBottom: '20px' }}>
+            🏠
+          </div>
+          <h1 style={{
+            color: 'white',
+            fontSize: '48px',
+            margin: '0',
+            fontWeight: 'bold',
+            letterSpacing: '2px'
+          }}>
+            RoomTap
+          </h1>
+          <p style={{
+            color: 'rgba(255,255,255,0.8)',
+            fontSize: '16px',
+            marginTop: '10px'
+          }}>
+            Find Your Perfect Space
+          </p>
+          <div className="loading-dots">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
         </div>
       </div>
     );
   }
 
+  // MAIN APP - NO LOGIN SCREEN!
   return (
     <div style={{ minHeight: '100vh', background: '#f5f5f5' }}>
       <header style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', padding: '15px 20px', position: 'sticky', top: 0, zIndex: 100, boxShadow: '0 2px 10px rgba(0,0,0,0.1)' }}>
